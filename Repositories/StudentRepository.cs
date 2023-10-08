@@ -1,4 +1,5 @@
 ﻿using EsolarManagerAPI.Models;
+using EsolarManagerAPI.Models.Enum;
 using EsolarManagerAPI.Repositories.Interfaces;
 using FirebirdSql.Data.FirebirdClient;
 using System.Data;
@@ -30,7 +31,7 @@ namespace EsolarManagerAPI.Repositories
                     await connection.OpenAsync();
                 }
                 var transaction = await connection.BeginTransactionAsync();
-                using (FbCommand command = new("INSERT INTO STUDENT (name, gender, cpf, date_of_birth) VALUES (@NAME, @GENDER, @CPF, @DATEOFBIRTH)", connection))
+                using (FbCommand command = new("INSERT INTO STUDENTS(name, gender, cpf, date_of_birth) VALUES (@NAME, @GENDER, @CPF, @DATEOFBIRTH)", connection))
                 {
                     command.Parameters.AddWithValue("@NAME", entity.Name);
                     command.Parameters.AddWithValue("@CPF", entity.CPF);
@@ -56,40 +57,138 @@ namespace EsolarManagerAPI.Repositories
             }
 
         }
+        public async Task Update(Student entity)
+        {
+            using (var connection = GetConnection())
+            {
+                if (connection.State == ConnectionState.Closed)
+                {
+                    await connection.OpenAsync();
+                }
+                using var command = new FbCommand("UPDATE STUDENTS SET NAME = @NAME, GENDER = @GENDER, CPF = @CPF, DATE_OF_BIRTH = @DATE_OF_BIRTH  WHERE REGISTRATION = @REGISTRATION", connection);
+                command.Parameters.AddWithValue("@NAME", entity.Name);
+                command.Parameters.AddWithValue("@GENDER", entity.Gender);
+                command.Parameters.AddWithValue("@CPF", entity.CPF);
+                command.Parameters.AddWithValue("@DATE_OF_BIRTH", entity.DateOfBirth);
 
+                var transaction = await connection.BeginTransactionAsync();
+                try
+                {
+                    var rowsAffected = await command.ExecuteNonQueryAsync();
+                    if (rowsAffected < 1)
+                    {
+                        throw new Exception();
+                    }
+                    await transaction.CommitAsync();
+                }
+                catch (Exception)
+                {
+                    await transaction.RollbackAsync();
+                    throw new Exception();
+                }
+                finally
+                {
+                    transaction.Dispose();
+                }
+            }
+        }
         public async Task Delete(Student entity)
         {
-            throw new NotImplementedException();
+            using (var connection = GetConnection())
+            {
+                if (connection.State == ConnectionState.Closed)
+                {
+                    await connection.OpenAsync();
+                }
+                using var command = new FbCommand("DELETE FROM STUDENTS WHERE REGISTRATION = @REGISTRATION", connection);
+                command.Parameters.AddWithValue("@REGISTRATION", entity.Registration);
+                var rowsAffected = await command.ExecuteNonQueryAsync();
+                if (rowsAffected < 1)
+                {
+                    throw new Exception();
+                }
+            }
         }
 
-        public Task<IEnumerable<Student>> Get()
+
+
+        public async Task<IEnumerable<Student>> GetAll()
         {
-            throw new NotImplementedException();
+            var students = new List<Student>();
+            using (var connection = GetConnection())
+            {
+                if (connection.State == ConnectionState.Closed)
+                {
+                    await connection.OpenAsync();
+                }
+                using var command = new FbCommand("SELECT * FROM STUDENTS", connection);
+                var dataReader = await command.ExecuteReaderAsync();
+                while (await dataReader.ReadAsync())
+                {
+                    Student student = new(
+                        registration: (int)dataReader.GetInt64("registration"),
+                        name: dataReader.GetString("name"),
+                        gender: (Gender)dataReader.GetInt64("gender"),
+                        cpf: dataReader.GetString("cpf"),
+                        dateOfBirth: dataReader.GetDateTime("date_of_birth")
+                    );
+                    students.Add(student);
+                }
+            }
+            return students;
+        }
+        public async Task<IEnumerable<Student>> Get(Expression<Func<Student, bool>> predicate)
+        {
+            var allStudents = await GetAll();
+            return allStudents.Where(predicate.Compile());
         }
 
-        public Task<IEnumerable<Student>> Get(Expression<Func<Student, bool>> predicate)
+
+        public async Task<IEnumerable<Student>> GetByContainingName(string partialName)
         {
-            throw new NotImplementedException();
+            var allStudents = await GetAll();
+            var studentsContainingName = allStudents.Where(student => student.Name.ToLower().Contains(partialName));
+
+            return studentsContainingName;
         }
 
-        public Task<IEnumerable<Student>> GetAll()
+        public async Task<Student> GetByRegistration(int registrationId)
         {
-            throw new NotImplementedException();
+            var allStudents = await GetAll();
+            var studentFound = allStudents.FirstOrDefault(student => student.Registration.Equals(registrationId));
+            return studentFound;
         }
 
-        public Task<IEnumerable<Student>> GetByCogetByContainingName(string partialName)
+        public async Task<IEnumerable<Student>> GetByPagination(int currentPage, int pageSize)
         {
-            throw new NotImplementedException();
-        }
+            int firstRow = pageSize * (currentPage - 1);
+            int lastRow = firstRow + pageSize; 
+            var students = new List<Student>();
+            using (var connection = GetConnection())
+            {
+                if (connection.State == ConnectionState.Closed)
+                {
+                    await connection.OpenAsync();
+                }
+                using var command = new FbCommand("SELECT FROM STUDENTS ROWS @FIRSTROW TO @LASTROW", connection);
+                command.Parameters.AddWithValue("@FIRSTROW", firstRow);
+                command.Parameters.AddWithValue("@LASTROW", lastRow);
 
-        public Task<Student> GetByRegistration(int registrationId)
-        {
-            throw new NotImplementedException();
-        }
+                var dataReader = await command.ExecuteReaderAsync();
+                while (await dataReader.ReadAsync())
+                {
+                    Student student = new(
+                        registration: (int)dataReader.GetInt64("registration"),
+                        name: dataReader.GetString("name"),
+                        gender: (Gender)dataReader.GetInt64("gender"),
+                        cpf: dataReader.GetString("cpf"),
+                        dateOfBirth: dataReader.GetDateTime("date_of_birth")
+                    );
+                    students.Add(student);
+                }
 
-        public Task Update(Student entity)
-        {
-            throw new NotImplementedException();
+            }
+            return students;
         }
     }
 }
